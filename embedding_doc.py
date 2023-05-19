@@ -8,7 +8,8 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.vectorstores import Chroma
 from langchain.schema import Document
 from langchain.document_loaders import (
-    UnstructuredMarkdownLoader, UnstructuredFileLoader, PyPDFLoader
+    UnstructuredMarkdownLoader, UnstructuredFileLoader, PyPDFLoader,
+    UnstructuredEPubLoader, UnstructuredHTMLLoader
 )
 
 from config import Settings
@@ -142,6 +143,58 @@ def get_pdf_new_docs(
     return new_docs, new_doc_amount
 
 
+def get_epub_new_docs(
+        dir: str,
+        already_handled_files: Set[str],
+) -> Tuple[List[Document], int]:
+    all_epub_files, _ = FileUtil.list_dir_with_suffix(dir, ".epub")
+    if not all_epub_files:
+        return [], 0
+    raise_exception_if_have_same_name_files(all_epub_files)
+
+    new_docs = []
+    new_doc_amount = 0
+    for file in all_epub_files:
+        file_name = os.path.basename(file)
+        if file_name in already_handled_files:
+            continue
+
+        new_doc_amount += 1
+        already_handled_files.add(file_name)
+        loader = UnstructuredEPubLoader(file)
+        pages = loader.load_and_split()
+        logger.info(
+            f'{file_name} will use token amount: {get_token_usage_of_docs(pages)}')
+        new_docs.extend(pages)
+    return new_docs, new_doc_amount
+
+
+def get_html_new_docs(
+        dir: str,
+        already_handled_files: Set[str],
+) -> Tuple[List[Document], int]:
+    all_html_files, _ = FileUtil.list_dir_with_suffix(dir, ".html")
+    if not all_html_files:
+        return [], 0
+    raise_exception_if_have_same_name_files(all_html_files)
+
+    new_docs = []
+    new_doc_amount = 0
+    for file in all_html_files:
+        file_name = os.path.basename(file)
+        if file_name in already_handled_files:
+            continue
+
+        new_doc_amount += 1
+        already_handled_files.add(file_name)
+        loader = UnstructuredHTMLLoader(file)
+        pages = loader.load_and_split()
+        logger.info(
+            f'{file_name} will use token amount: {get_token_usage_of_docs(pages)}')
+        new_docs.extend(pages)
+    return new_docs, new_doc_amount
+
+
 def prepare_paper_and_get_chromaDBClient(conf: Settings) -> Chroma:
     logger.info("start indexing files")
     # load已经索引过的文档
@@ -191,6 +244,15 @@ def prepare_paper_and_get_chromaDBClient(conf: Settings) -> Chroma:
 
     # json
 
+    # epub
+    logger.info(f'start parsing epub files')
+    new_epub_docs, new_epub_file_amount = get_epub_new_docs(
+        paper_dir, already_embedded_fileNames)
+    total_new_file_amount += new_epub_file_amount
+    total_new_docs.extend(new_epub_docs)
+    logger.info(
+        f'finished parsing epub files. have {new_epub_file_amount} new file need to index\n')
+
     # csv
     logger.info(f'start parsing csv files')
     new_csv_docs, new_csv_file_amount = get_csv_new_docs(
@@ -210,6 +272,13 @@ def prepare_paper_and_get_chromaDBClient(conf: Settings) -> Chroma:
         f'finished parsing txt files. have {new_txt_file_amount} new file need to index\n')
 
     # html
+    logger.info(f'start parsing html files')
+    new_html_docs, new_html_file_amount = get_html_new_docs(
+        paper_dir, already_embedded_fileNames)
+    total_new_file_amount += new_html_file_amount
+    total_new_docs.extend(new_html_docs)
+    logger.info(
+        f'finished parsing html files. have {new_html_file_amount} new file need to index\n')
 
     # persist
     logger.info(f'parsing file finished, start persist to disk')
